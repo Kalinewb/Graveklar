@@ -120,10 +120,24 @@ function AdminLoginForm() {
           </CardHeader>
           <CardContent>
             <form onSubmit={handleChangePassword} className="space-y-4">
+              {/* Same reason as on the login form: without a username field a
+                  password manager will not offer to *update* the stored item
+                  after the new password is saved. */}
+              <input
+                type="text"
+                name="username"
+                autoComplete="username"
+                value="admin"
+                readOnly
+                hidden
+                aria-hidden="true"
+                tabIndex={-1}
+              />
               <div>
                 <Label htmlFor="new-password">Nytt passord</Label>
                 <Input
                   id="new-password"
+                  name="new-password"
                   type="password"
                   value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)}
@@ -137,6 +151,7 @@ function AdminLoginForm() {
                 <Label htmlFor="confirm-password">Bekreft passord</Label>
                 <Input
                   id="confirm-password"
+                  name="confirm-password"
                   type="password"
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
@@ -150,6 +165,8 @@ function AdminLoginForm() {
                   <Label htmlFor="change-code">2FA-kode</Label>
                   <Input
                     id="change-code"
+                    name="totp"
+                    type="text"
                     inputMode="numeric"
                     autoComplete="one-time-code"
                     value={changeCode}
@@ -187,17 +204,39 @@ function AdminLoginForm() {
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4" suppressHydrationWarning>
+            {/* Password managers only classify a form as a *login* — and only
+                offer to save or update the item — when a password field is
+                paired with a username field. The admin area has one shared
+                account and nothing to type here, so the field is present but
+                hidden: Bitwarden skips non-viewable inputs when filling, and
+                Chrome stops treating the password as unpaired. */}
+            <input
+              type="text"
+              name="username"
+              autoComplete="username"
+              value="admin"
+              readOnly
+              hidden
+              aria-hidden="true"
+              tabIndex={-1}
+            />
             <div>
               <Label htmlFor="password">Passord</Label>
+              {/* `name` matters as much as `type` here: Bitwarden matches a
+                  field on name/id/placeholder, and its save prompt reads the
+                  submitted field names. `readOnly` is deliberately *not* set
+                  when the 2FA step appears — Bitwarden drops readonly password
+                  fields when it collects the page, so locking this one made
+                  the whole form stop looking like a login to the extension. */}
               <Input
                 id="password"
+                name="password"
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 className="mt-1.5"
                 autoComplete="current-password"
                 required
-                readOnly={requiresTotp}
               />
             </div>
             {requiresTotp && (

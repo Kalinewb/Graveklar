@@ -13,6 +13,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { copyToClipboard } from '@/lib/clipboard';
 
 interface Props {
   open: boolean;
@@ -37,6 +38,7 @@ export default function TotpPromptModal({ open, onClose, onVerified, context }: 
   const [error, setError] = useState('');
   const [working, setWorking] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [copyFailed, setCopyFailed] = useState(false);
 
   // Reset state every time the modal opens.
   useEffect(() => {
@@ -45,6 +47,8 @@ export default function TotpPromptModal({ open, onClose, onVerified, context }: 
     setEnrollPassword('');
     setError('');
     setSetup(null);
+    setCopied(false);
+    setCopyFailed(false);
     setMode('loading');
     (async () => {
       try {
@@ -122,11 +126,18 @@ export default function TotpPromptModal({ open, onClose, onVerified, context }: 
     }
   };
 
+  // `navigator.clipboard` does not exist outside a secure context, and this
+  // panel is also served over plain HTTP on a LAN — the bare
+  // `navigator.clipboard.writeText(...)` this used to call threw there, so the
+  // button did nothing at all. `copyToClipboard` falls back to a selection
+  // copy and reports failure instead of throwing, so the worst case is a hint
+  // to select the secret by hand rather than a dead button.
   const copySecret = async () => {
     if (!setup) return;
-    await navigator.clipboard.writeText(setup.secret);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    const ok = await copyToClipboard(setup.secret);
+    setCopied(ok);
+    setCopyFailed(!ok);
+    if (ok) setTimeout(() => setCopied(false), 2000);
   };
 
   return (
@@ -161,11 +172,27 @@ export default function TotpPromptModal({ open, onClose, onVerified, context }: 
             <div>
               <Label className="text-xs uppercase tracking-wider text-muted-foreground">Manuell oppføring</Label>
               <div className="flex items-center gap-2 mt-1">
-                <code className="flex-1 px-2 py-1.5 rounded bg-muted font-mono text-xs break-all">{setup.secret}</code>
-                <Button type="button" variant="outline" size="sm" onClick={copySecret} className="shrink-0">
+                {/* `select-all` so one click marks the whole secret: the
+                    manual route out of a browser that blocks clipboard writes
+                    entirely. */}
+                <code className="flex-1 px-2 py-1.5 rounded bg-muted font-mono text-xs break-all select-all">{setup.secret}</code>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={copySecret}
+                  className="shrink-0"
+                  title="Kopier nøkkelen"
+                  aria-label="Kopier nøkkelen"
+                >
                   {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
                 </Button>
               </div>
+              {copyFailed && (
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Nettleseren tillot ikke kopiering. Marker nøkkelen over og kopier den manuelt.
+                </p>
+              )}
             </div>
           </div>
         )}
@@ -210,6 +237,7 @@ export default function TotpPromptModal({ open, onClose, onVerified, context }: 
                 </Label>
                 <Input
                   id="totp-password"
+                  name="password"
                   type="password"
                   value={enrollPassword}
                   onChange={(e) => setEnrollPassword(e.target.value)}

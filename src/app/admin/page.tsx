@@ -92,6 +92,7 @@ import { MockBookingSheet } from '@/components/admin/MockBookingSheet';
 import { CompletedChecklistsSummary } from '@/components/admin/CompletedChecklistsSummary';
 import { computeFuelNeeds, fuelCansLabel } from '@/lib/fuel';
 import { formatMachineLabel } from '@/lib/machine-display';
+import { copyToClipboard } from '@/lib/clipboard';
 import {
   parseChecklistData,
   filterPhasesForBooking,
@@ -1439,7 +1440,8 @@ export default function AdminPage() {
 
   // ─── Copy field helper ───
   const copyField = (value: string, fieldId: string) => {
-    navigator.clipboard.writeText(value).then(() => {
+    copyToClipboard(value).then((ok) => {
+      if (!ok) return;
       setCopiedField(fieldId);
       setTimeout(() => setCopiedField(null), 1500);
     });
@@ -3255,7 +3257,7 @@ export default function AdminPage() {
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
                           {q.acceptToken && (
-                            <DropdownMenuItem onClick={() => { navigator.clipboard?.writeText(`${window.location.origin}/tilbud/${q.acceptToken}`); }}>
+                            <DropdownMenuItem onClick={() => { void copyToClipboard(`${window.location.origin}/tilbud/${q.acceptToken}`); }}>
                               <Copy className="w-4 h-4 mr-2" />Kopier tilbudslenke
                             </DropdownMenuItem>
                           )}

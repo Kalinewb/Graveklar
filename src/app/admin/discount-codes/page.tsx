@@ -17,6 +17,7 @@ import {
 } from '@/components/ui/sheet';
 import { Toggle, Stepper, Slider, FieldRow } from '@/components/admin-ui';
 import TotpPromptModal from '@/components/admin/TotpPromptModal';
+import { copyToClipboard } from '@/lib/clipboard';
 
 interface RepeatRow {
   id: string;
@@ -208,7 +209,10 @@ export default function DiscountCodesPage() {
   };
 
   const copyCode = async (code: string) => {
-    await navigator.clipboard.writeText(code).catch(() => {});
+    if (!(await copyToClipboard(code))) {
+      toast.error('Nettleseren tillot ikke kopiering — marker koden og kopier manuelt.');
+      return;
+    }
     setCopied(code);
     setTimeout(() => setCopied(null), 1500);
   };
