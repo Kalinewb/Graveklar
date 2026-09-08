@@ -1,0 +1,50 @@
+name: Claude Code
+
+# Interactive assistant. Mention `@claude` in any issue, PR comment, or review
+# and Claude will analyze the context and respond — answering questions,
+# implementing fixes, or pushing changes to the PR branch.
+#
+# Auth uses a Claude Pro/Max subscription (no metered API key). Generate a
+# token by running `claude setup-token` in a Claude Code terminal, then add it
+# as a repository secret named CLAUDE_CODE_OAUTH_TOKEN (Settings → Secrets and
+# variables → Actions). Until that secret is set, the step is skipped.
+
+on:
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+  issues:
+    types: [opened, assigned]
+  pull_request_review:
+    types: [submitted]
+
+jobs:
+  claude:
+    if: |
+      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
+      (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
+      (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude')) ||
+      (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      id-token: write
+      actions: read
+    env:
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Run Claude Code
+        id: claude
+        # Skip (rather than fail) until the OAuth token secret is configured.
+        if: ${{ env.CLAUDE_CODE_OAUTH_TOKEN != '' }}
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ env.CLAUDE_CODE_OAUTH_TOKEN }}

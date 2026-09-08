@@ -1,0 +1,10 @@
+[Unit]
+Description=Graveklar — run the database backup every night at 03:00
+
+[Timer]
+OnCalendar=*-*-* 03:00:00
+# Catch up after sleep or a reboot instead of skipping the night.
+Persistent=true
+
+[Install]
+WantedBy=timers.target

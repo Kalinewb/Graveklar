@@ -1,0 +1,37 @@
+services:
+  graveklar:
+    build: .
+    image: graveklar:latest
+    container_name: graveklar
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - graveklar-db:/app/db
+    environment:
+      # SQLite database — stored in the named volume
+      DATABASE_URL: file:/app/db/custom.db
+
+      # Local time for booking-day boundaries and cancellation cut-offs
+      TZ: Europe/Oslo
+
+      # ── Required ──────────────────────────────────────────────────────────────
+      # Password for the /admin panel
+      ADMIN_PASSWORD: change-me-in-production
+
+      # Secret used to sign session tokens — set to a long random string
+      # Generate one with: openssl rand -hex 32
+      ADMIN_SESSION_SECRET: change-me-in-production
+
+      # ── Optional SMTP (can also be set from Admin → Settings → E-post) ───────
+      # SMTP_HOST: smtp.example.com
+      # SMTP_PORT: 587
+      # SMTP_SECURE: "false"
+      # SMTP_USER: noreply@example.com
+      # SMTP_PASS: your-smtp-password
+      # SMTP_FROM: "Graveklar <noreply@example.com>"
+      # ADMIN_EMAIL: admin@example.com
+
+volumes:
+  graveklar-db:
+    driver: local

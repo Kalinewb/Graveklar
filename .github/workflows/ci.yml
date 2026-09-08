@@ -1,0 +1,45 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Prisma generate
+        # Required so @prisma/client types resolve before tsc runs.
+        run: npx prisma generate
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Tests with coverage
+        # Enforces the Gate B coverage floors in vitest.config.ts (audit,
+        # 2026-09-07): the run fails when a floor is undercut.
+        run: npm run test:coverage
+
+      - name: Build
+        # Dummy env vars so `next build` doesn't fail on env validation.
+        # Mirrors the Dockerfile's build-time stub values.
+        env:
+          DATABASE_URL: file:/tmp/ci-build.db
+          ADMIN_PASSWORD: ci-build-not-used
+          ADMIN_SESSION_SECRET: ci-build-not-used
+        run: npm run build

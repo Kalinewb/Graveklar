@@ -1,0 +1,47 @@
+# Dependencies
+node_modules
+
+# Next.js build output
+.next
+out
+
+# Local database (volume-mounted in production)
+db/
+prisma/db/
+
+# Environment files (injected at runtime)
+.env
+.env.*
+!.env.example
+
+# Development & tooling
+.git
+.gitignore
+.claude
+.zscripts
+agent-ctx
+download
+upload
+examples
+skills
+
+# Logs
+*.log
+dev.log
+server.log
+
+# TypeScript build info
+*.tsbuildinfo
+next-env.d.ts
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode
+.idea
+
+# Test data
+test
+coverage

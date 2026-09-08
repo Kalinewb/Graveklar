@@ -1,0 +1,567 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Booking {
+  id              String    @id @default(cuid())
+  reference       String    @unique
+  name            String
+  phone           String
+  email           String
+  deliveryAddress String
+  selfPickup      Boolean   @default(false)
+  rentalType      String // "day" | "weekend" | "week" | "custom"
+  startDate       DateTime
+  customDays      Int?
+  preferredTime   String?
+  deliveryDistance Float
+  deliveryFee     Int
+  basePrice       Int
+  totalPrice      Int
+  includedHours   Int       @default(0)
+  extraHours         Int       @default(0)
+  extraHoursCost     Int       @default(0)
+  totalHours         Int       @default(0)
+  notes           String?
+  status          String    @default("pending") // pending | confirmed | cancelled | completed
+  // "consumer" (B2C) or "business" (B2B, converted from a QuoteRequest).
+  // Drives which terms audience gets frozen into the AcceptedContract.
+  customerType    String    @default("consumer")
+  termsAcceptedAt   DateTime?
+  fullyPaidAt       DateTime?
+  cancellationFee   Int?
+  machineId         String?
+  machine           Machine?  @relation(fields: [machineId], references: [id])
+  adminNote         String?
+  cancelToken       String?   @unique
+  cancelTokenExpiry DateTime?
+  reminderSentAt    DateTime?
+  checklistData     String?   @default("{}")
+  checklistToken    String?   @unique
+  renterSubmissions ChecklistSubmission[]
+  stripeSessionId        String?
+  stripePaymentIntentId  String?
+  stripeRefundId         String?
+  refundAmount           Int?
+  // Which provider owns this booking's charge: 'vipps' | 'stripe'. Null on
+  // bookings created before Vipps existed — treat null as 'stripe'.
+  paymentProvider        String?
+  // Vipps ePayment reference. Must be unique per sales unit forever, so a
+  // retry after an abandoned attempt gets a new one (…-r2, -r3) rather than
+  // reusing this value.
+  vippsReference         String?   @unique
+  // Last known Vipps state: CREATED | AUTHORIZED | ABORTED | EXPIRED | TERMINATED.
+  vippsState             String?
+  // Set once the authorized reservation has actually been captured. Vipps only
+  // RESERVES on authorization — without a capture no money ever moves.
+  vippsCapturedAt        DateTime?
+  // 'card' | 'vipps' | 'invoice' | 'mock'. Written by four places, so anything
+  // reconciling revenue by method has to know all of them:
+  //   card    — the Stripe PaymentMethod.type read at confirmation time
+  //             (getSessionPaymentMethodType); Stripe's own vocabulary, so an
+  //             unusual method it reports lands here verbatim.
+  //   vipps   — src/lib/vipps-payments.ts on capture
+  //   invoice — the B2B accept route, src/app/api/tilbud/[token]/route.ts
+  //   mock    — the admin mock-booking tool, src/lib/mock-booking.ts
+  // Null on pre-instrumentation bookings and on still-pending bookings.
+  paymentMethod          String?
+  paymentDeadline        DateTime?  // set when checkout.session expires/fails; cron cancels past this
+  paymentRetries         Int       @default(0)  // # of expired-checkout retry grants; after the cap the next expiry cancels the booking
+  discountKr             Int?       // applied discount in kr (subtracted from totalPrice)
+  discountLabel          String?    // human-readable label ("Førstegangskunde (-10%)" / "Returkunde-kode RETUR-XXXX")
+  // Contract signing for handover. Manual/B2B flows track the Digipost
+  // lifecycle here, through applyContractSigningUpdate().
+  // NOTE: paying online does NOT sign a contract. resolveContractSigning()
+  // deliberately keeps a confirmed online booking at 'pending' until it is
+  // really signed, and freeze-contract.ts only stores the accepted terms — so
+  // 'online' is reserved for a future e-signing integration and no code path
+  // writes it today. 'not_required' is likewise only ever DERIVED at read time
+  // by resolveContractSigning(), never stored. (Finding U-4: the comment used
+  // to promise both, which the code contradicts.)
+  contractSigningMethod  String?    // stored: digipost | paper  (reserved: online)
+  contractSigningStatus  String?    // stored: pending | sent | signed | paper  (derived only: not_required)
+  contractSentAt         DateTime?
+  contractSignedAt       DateTime?
+  digipostReference      String?    // external message id when Digipost API is wired
+  contractSigningNote    String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  // Back-references so the FK constraints declared on the child models are
+  // valid Prisma. The actual cascade behaviour lives on the child side.
+  acceptedContract    AcceptedContract?
+  review              Review?
+  campaignRedemptions CampaignRedemption[]
+  referralRedemptions ReferralRedemption[]
+  repeatCodesIssued   RepeatDiscountCode[] @relation("RepeatCodeIssuingBooking")
+  repeatCodesRedeemed RepeatDiscountCode[] @relation("RepeatCodeRedeemingBooking")
+
+  // Hot-path indexes. Without these every admin list, every availability
+  // query, and every cron sweep is a full table scan — fine at 100 rows,
+  // catastrophic at 100k.
+  @@index([status, createdAt])           // admin list, ordered by recency
+  @@index([status, paymentDeadline])     // cleanup sweep
+  @@index([status, startDate])           // reminders cron, availability
+  @@index([email])                       // discount eligibility lookups
+  @@index([machineId, startDate])        // per-machine availability
+}
+
+// Post-rental customer review. One per booking. Created (status="pending")
+// with a tokenized public link when a booking transitions to "completed";
+// the customer submits a rating + comment (status="submitted"); an admin then
+// approves or rejects it (status="approved" | "rejected"). Only approved rows
+// surface publicly. Reviewer name is stored separately (first name only) so
+// the public display never leaks the full booking name/email.
+model Review {
+  id           String    @id @default(cuid())
+  bookingId    String    @unique
+  booking      Booking   @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  token        String    @unique
+  rating       Int?      // 1–5, null until submitted
+  comment      String?
+  reviewerName String?   // first name shown publicly
+  status       String    @default("pending") // pending | submitted | approved | rejected
+  submittedAt  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@index([status, submittedAt])
+}
+
+// B2B quote-request → offer → accept thread. One row holds the lead, the
+// offer, and any in-place revisions (the "counteroffer" is just the admin
+// editing offerAmount/offerMessage and re-sending). Deliberately separate
+// from Booking: an unvetted business never touches the availability calendar
+// until the offer is accepted and converted into a real Booking. The accept
+// link reuses the Booking cancelToken pattern (tokenized public action).
+model QuoteRequest {
+  id                 String    @id @default(cuid())
+  reference          String    @unique
+  // Lead / company details
+  company            String
+  orgNumber          String
+  contactName        String
+  email              String
+  phone              String
+  // What they want
+  machineId          String?
+  machine            Machine?  @relation(fields: [machineId], references: [id])
+  startDate          DateTime?
+  rentalType         String? // day | weekend | week | custom
+  customDays         Int?
+  projectDescription String?
+  // The liability gate: business confirms operators hold documented M2
+  // training. We rent in reliance on this — see business terms.
+  trainingConfirmed  Boolean   @default(false)
+  // Lifecycle: ny → tilbud_sendt → akseptert → konvertert
+  //                       ↘ avslatt | utlopt | trukket
+  status             String    @default("ny")
+  // Offer (set by admin; revised in place = counteroffer)
+  offerAmount        Int?
+  offerMessage       String?
+  offerValidUntil    DateTime?
+  paymentMode        String? // card | invoice
+  // Tokenized public accept link (mirrors Booking.cancelToken)
+  acceptToken        String?   @unique
+  acceptTokenExpiry  DateTime?
+  // Set once the accepted offer is turned into a real Booking
+  convertedBookingId String?
+  adminNote          String?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  @@index([status, createdAt])
+  @@index([email])
+}
+
+model UnavailableDate {
+  id        String   @id @default(cuid())
+  date      DateTime @unique
+  reason    String?
+  createdAt DateTime @default(now())
+}
+
+model BookingDateLock {
+  id        String   @id @default(cuid())
+  bookingId String
+  machineId String
+  date      DateTime
+  slot      Int      @default(0)
+  createdAt DateTime @default(now())
+
+  @@unique([machineId, date, slot])
+  @@index([bookingId])
+}
+
+model PricingConfig {
+  id    String @id @default(cuid())
+  key   String @unique
+  value Float
+  label String
+  group String
+}
+
+model AppConfig {
+  key       String  @id
+  value     String  @default("")
+  label     String
+  group     String
+  type      String  @default("text")
+  isPublic  Boolean @default(false)
+  sortOrder Int     @default(0)
+}
+
+model Machine {
+  id          String    @id @default(cuid())
+  name        String
+  category    String?
+  model       String
+  year        String?
+  description String?
+  imageUrl    String?
+  isActive    Boolean   @default(true)
+  specs       String?
+  features    String?
+  included    String?
+  sortOrder   Int       @default(0)
+  quantity    Int       @default(1)
+  dayPrice           Int?
+  weekendPrice       Int?
+  weekPrice          Int?
+  dayIncludedHours   Int?
+  weekendIncludedHours Int?
+  weekIncludedHours  Int?
+  overtimeRate       Int?
+  preOrderHourRate   Int?
+  fuelTankLiters     Float?
+  fuelConsumptionPerHour Float?
+  photoScale         Int?     // 0-100, how much of the frame the photo fills
+  bookings    Booking[]
+  documents   MachineDocument[]
+  quoteRequests QuoteRequest[]
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
+
+// Customer-facing documents/manuals attached to a piece of equipment (PDFs,
+// images). Shown publicly on the "Leievilkår og manualer" page so customers
+// can read the manuals before booking. Replaced wholesale on machine save.
+model MachineDocument {
+  id        String   @id @default(cuid())
+  machineId String
+  machine   Machine  @relation(fields: [machineId], references: [id], onDelete: Cascade)
+  title     String
+  fileUrl   String
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+
+  @@index([machineId])
+}
+
+model TermsSection {
+  id        String   @id @default(cuid())
+  title     String
+  content   String
+  sortOrder Int      @default(0)
+  isActive  Boolean  @default(true)
+  // "consumer" (privat/forbruker) or "business" (bedrift/B2B). Lets one
+  // table hold two distinct term sets that never leak across surfaces.
+  audience  String   @default("consumer")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([audience, isActive, sortOrder])
+}
+
+model FaqItem {
+  id        String   @id @default(cuid())
+  question  String
+  answer    String
+  sortOrder Int      @default(0)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model InsuranceCard {
+  id        String   @id @default(cuid())
+  label     String
+  value     String
+  detail    String
+  sortOrder Int      @default(0)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model ChecklistPhase {
+  id        String          @id @default(cuid())
+  name      String
+  sortOrder Int             @default(0)
+  isActive  Boolean         @default(true)
+  // Which booking variant this phase applies to:
+  //   'all'        → shown for both delivery + selfPickup (default)
+  //   'delivery'   → only when booking.selfPickup = false
+  //   'selfPickup' → only when booking.selfPickup = true
+  appliesTo String          @default("all")
+  // When true, completing every active item in this phase auto-transitions
+  // the booking to 'completed'. Explicit flag replaces the previous
+  // /retur|hent|return|pickup/i name-regex heuristic — an admin renaming
+  // the phase no longer silently disables completion. Default false so
+  // pre-existing phases don't all start auto-completing on the next save.
+  isCompletionTrigger Boolean @default(false)
+  // Who fills this phase:
+  //   'operator' → admin/field staff (default)
+  //   'renter'   → customer via QR (/sjekkliste)
+  //   'split'    → operator when delivery, renter when self-pickup
+  audience      String          @default("operator")
+  // How often renters must complete this phase during an active rental:
+  //   'once'   → single submission per booking
+  //   'return' → renter phase unlocks on rental end date (self-pickup return load)
+  //   'daily'  → one submission per calendar day within rental period
+  //   'hours' → every intervalHours during rental (requires intervalHours)
+  intervalMode  String          @default("once")
+  intervalHours Int?
+  items     ChecklistItem[]
+  submissions ChecklistSubmission[]
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+}
+
+// AcceptedContract: an immutable snapshot of the rental terms as the
+// customer saw them at booking acceptance. The HTML is the legal artifact —
+// PDFs are generated on-demand from this HTML, never stored separately.
+// The TOC template can evolve in admin without affecting historical contracts.
+model AcceptedContract {
+  id               String   @id @default(cuid())
+  bookingId        String   @unique
+  booking          Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  renderedHtml     String           // exact HTML the customer agreed to
+  termsVersionHash String           // sha-256 of (template + variable values)
+  renderContext    String           // JSON: variables resolved at render time
+  acceptedAt       DateTime
+  acceptedFromIp   String?
+  // Stored: 'checkbox' — the booking form's terms checkbox, the only caller of
+  // freezeContractForBooking(). 'scroll-then-checkbox' is accepted by that
+  // function's input type for a stricter flow that does not exist yet, so no
+  // code path writes it (finding U-4).
+  acceptanceMethod String           // 'checkbox'  (accepted but unused: 'scroll-then-checkbox')
+  createdAt        DateTime @default(now())
+}
+
+// SystemState: derived / cached machine state, NOT admin-editable.
+// AppConfig holds intent ("the address is Industriveien 5"); SystemState
+// holds machine-computed derivations ("…which geocodes to 67.28, 14.37,
+// resolved at 2026-05-29T08:42Z"). The invariant: never let derived values
+// leak into AppConfig.
+// Single-admin TOTP. One row keyed `admin`. When stripping multi-user
+// concerns we keep this minimal — a shared secret, scanable once into
+// Bitwarden/Aegis/etc. Recovery codes deferred to a follow-up.
+// One-shot discount code issued to a specific email after a completed
+// rental. Single-use — `redeemedByBookingId` flips from null on use.
+// Reusable campaign discount codes — SOMMER2026, NYHET10, etc. Multi-use
+// (capped by maxUses or uncapped) and not bound to a specific email. Used
+// for marketing pushes vs RepeatDiscountCode which is the single-use
+// goodwill code locked to a returning customer's email.
+model CampaignDiscountCode {
+  id          String                @id @default(cuid())
+  code        String                @unique
+  percent     Int                                   // 1-100
+  maxUses     Int?                                  // null = unlimited
+  usedCount   Int                   @default(0)
+  expiresAt   DateTime?
+  isActive    Boolean               @default(true)
+  notes       String?                               // admin-only description
+  redemptions CampaignRedemption[]
+  createdAt   DateTime              @default(now())
+}
+
+model CampaignRedemption {
+  id         String                @id @default(cuid())
+  codeId     String
+  code       CampaignDiscountCode  @relation(fields: [codeId], references: [id], onDelete: Cascade)
+  bookingId  String
+  booking    Booking               @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  email      String                                // captured at redemption time
+  redeemedAt DateTime              @default(now())
+
+  @@index([codeId])
+  @@index([bookingId])
+}
+
+// Referral system — every customer gets a personal GRAV-XXXX code minted
+// when their first booking is confirmed. They share it, friends use it at
+// checkout (10% off referee), and on confirmation a single-use RETUR-XXXX
+// code is issued back to the referrer (10% off their next booking).
+model ReferralCode {
+  id                  String                @id @default(cuid())
+  code                String                @unique  // GRAV-XXXX
+  ownerEmail          String                              // normalized lowercase
+  issuedForBookingId  String?
+  totalRedemptions    Int                   @default(0)
+  lifetimeRewardKr    Int                   @default(0)   // sum of discount kr earned
+  redemptions         ReferralRedemption[]
+  createdAt           DateTime              @default(now())
+
+  @@index([ownerEmail])
+}
+
+model ReferralRedemption {
+  id                  String                @id @default(cuid())
+  referralCodeId      String
+  referralCode        ReferralCode          @relation(fields: [referralCodeId], references: [id], onDelete: Cascade)
+  referredBookingId   String                                // the new customer's booking
+  referredBooking     Booking               @relation(fields: [referredBookingId], references: [id], onDelete: Cascade)
+  referredEmail       String                                // normalized; for audit + anti-abuse
+  rewardCodeId        String?                               // RepeatDiscountCode.id minted to the referrer
+  rewardKr            Int                   @default(0)     // for analytics + lifetimeRewardKr rollup
+  redeemedAt          DateTime              @default(now())
+
+  @@index([referralCodeId])
+  @@index([referredBookingId])
+  @@index([referredEmail])
+}
+
+model RepeatDiscountCode {
+  id                   String    @id @default(cuid())
+  code                 String    @unique
+  email                String    // lowercased, trimmed
+  issuedForBookingId   String?   // the booking that earned the code
+  // SetNull on delete: keep the code row so the email-bound coupon survives
+  // a stale booking cleanup. Validation treats redeemedAt as the canonical
+  // "this code is used" signal, so a NULL'd redeemedByBookingId on a row
+  // that still has redeemedAt set is correctly treated as already-redeemed.
+  issuedForBooking     Booking?  @relation("RepeatCodeIssuingBooking", fields: [issuedForBookingId], references: [id], onDelete: SetNull)
+  redeemedByBookingId  String?   // null until used; locks to one booking
+  redeemedByBooking    Booking?  @relation("RepeatCodeRedeemingBooking", fields: [redeemedByBookingId], references: [id], onDelete: SetNull)
+  expiresAt            DateTime?
+  createdAt            DateTime  @default(now())
+  redeemedAt           DateTime?
+
+  @@index([email])
+}
+
+model AdminTotp {
+  id          String   @id @default(cuid())
+  secret      String   // base32-encoded TOTP secret
+  enrolledAt  DateTime @default(now())
+  lastUsedAt  DateTime?
+  // The 30-second time-step of the last accepted code. A code is rejected if
+  // its step has already been consumed, so a captured code can't be replayed
+  // within its validity window.
+  lastUsedStep Int?
+}
+
+// Append-only log of sensitive admin changes. `changes` is JSON-encoded
+// [{ key, from, to }, ...]. We never delete — this is the audit trail.
+model AdminAuditLog {
+  id        String   @id @default(cuid())
+  actor     String   // 'admin' for now; ready for real user IDs later
+  action    String   // 'config.update' | 'pricing.update' | ...
+  changes   String   // JSON
+  ip        String?
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([action])
+}
+
+model SystemState {
+  key       String   @id
+  value     String   // JSON-encoded payload
+  updatedAt DateTime @updatedAt
+}
+
+model WebhookEvent {
+  id          String   @id @default(cuid())
+  provider    String   // 'stripe' | 'vipps'
+  eventId     String
+  processedAt DateTime @default(now())
+
+  @@unique([provider, eventId])
+}
+
+model SurveyResponse {
+  id        String   @id @default(cuid())
+  data      String   // full JSON of all answers
+  email     String?  // extracted from data.epost for easy querying
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+}
+
+// Admin-editable survey question set (the Behovsundersøkelse). Both the
+// customer wizard and the admin response viewer read from this single table —
+// no more hand-syncing a hardcoded LABELS map. Seeded from survey-defaults.ts
+// when empty (mirrors FaqItem). SurveyResponse stays a flexible JSON blob so
+// editing/removing questions never breaks already-collected answers.
+model SurveyQuestion {
+  id        String   @id @default(cuid())
+  key       String   @unique  // stable slug → answer key in the response JSON (e.g. "planlagt")
+  type      String             // intro | radio | check | likert | range | text | email | price-callout
+  section   String             // wizard step grouping/tag, e.g. "Om deg"
+  label     String
+  hint      String?
+  options   String?            // JSON string[] for radio/check/likert
+  config    String?            // JSON: range{min,max,step,unit} · check{max} · text{placeholder,maxLength,inputMode} · email{consentRequired,consentLabel} · price-callout{source,periods}
+  required  Boolean  @default(true)
+  isActive  Boolean  @default(true)
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([isActive, sortOrder])
+}
+
+model ChecklistItem {
+  id         String         @id @default(cuid())
+  phaseId    String
+  phase      ChecklistPhase @relation(fields: [phaseId], references: [id], onDelete: Cascade)
+  label      String
+  // checkbox | yesno | number | text | photo | measurement
+  answerType String         @default("checkbox")
+  unit       String?
+  sortOrder  Int            @default(0)
+  isActive   Boolean        @default(true)
+  // Conditional visibility/requirement: when set, this item is only shown
+  // and only required if the controlling item (conditionItemId, same phase)
+  // currently holds conditionValue. For checkbox/yesno parents the value is
+  // "ja"/"nei"; for text/number it's a case-insensitive exact match.
+  // Example: "Skader?" (yesno) = "ja" → makes a photo item mandatory.
+  conditionItemId String?
+  conditionValue  String?
+  // Pairs numeric readings across phases for the PDF "Statistikk" block.
+  // Items sharing a statKey (or, if unset, an identical label) are tracked
+  // start→end across phases and the difference is computed. Example: an
+  // "Timeteller" measurement on both Levering and Retur → hours used.
+  statKey    String?
+  // For photo items: minimum number of images required to mark it complete.
+  // Photo answers are stored as a JSON string array; null/0 means 1.
+  minPhotos  Int?
+  createdAt  DateTime       @default(now())
+  updatedAt  DateTime       @updatedAt
+}
+
+// Periodic renter checklist submissions (QR kiosk). Operator phases store
+// answers in Booking.checklistData; renter phases store one row per
+// (booking, phase, interval) tuple.
+model ChecklistSubmission {
+  id          String         @id @default(cuid())
+  bookingId   String
+  booking     Booking        @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  phaseId     String
+  phase       ChecklistPhase @relation(fields: [phaseId], references: [id], onDelete: Cascade)
+  intervalKey String
+  data        String         @default("{}")
+  phone       String
+  submittedAt DateTime       @default(now())
+
+  @@unique([bookingId, phaseId, intervalKey])
+  @@index([bookingId])
+  @@index([phone])
+}

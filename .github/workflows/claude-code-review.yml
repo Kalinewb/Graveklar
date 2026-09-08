@@ -1,0 +1,44 @@
+name: Claude Code Review
+
+# Automatically review every pull request. Uses Anthropic's official
+# `code-review` plugin, which posts severity-tagged inline comments on the
+# diff. Runs on PR open and on every new push to the PR.
+#
+# Auth uses a Claude Pro/Max subscription (no metered API key). Generate a
+# token by running `claude setup-token` in a Claude Code terminal, then add it
+# as a repository secret named CLAUDE_CODE_OAUTH_TOKEN (Settings → Secrets and
+# variables → Actions). Until that secret is set, the review step is skipped
+# (the job stays green) instead of failing.
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      # claude-code-action@v1 exchanges an OIDC token for its GitHub token,
+      # so id-token: write is required.
+      id-token: write
+      actions: read
+    env:
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Claude code review
+        # Skip (rather than fail) until the OAuth token secret is configured.
+        if: ${{ env.CLAUDE_CODE_OAUTH_TOKEN != '' }}
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ env.CLAUDE_CODE_OAUTH_TOKEN }}
+          plugin_marketplaces: "https://github.com/anthropics/claude-code.git"
+          plugins: "code-review@claude-code-plugins"
+          prompt: "/code-review:code-review ${{ github.repository }}/pull/${{ github.event.pull_request.number }}"
+          claude_args: "--max-turns 20"

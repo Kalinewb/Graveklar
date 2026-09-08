@@ -1,0 +1,11 @@
+[Unit]
+Description=Graveklar — nightly online SQLite backup (scripts/backup-db.sh)
+Documentation=https://graveklar.no
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/deller/Documents/graveklar
+# DATABASE_URL comes from .env, exactly as graveklar.service reads it.
+EnvironmentFile=/home/deller/Documents/graveklar/.env
+Environment=RETENTION_DAYS=30
+ExecStart=/bin/sh /home/deller/Documents/graveklar/scripts/backup-db.sh

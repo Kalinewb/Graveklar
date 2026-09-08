@@ -1,0 +1,15 @@
+[Unit]
+Description=Graveklar — every 10 min cleanup of stale pending bookings
+# Why: a booking that started Stripe checkout but never paid holds its date
+# locked. Without this sweep, that date is unbookable for everyone else
+# until someone notices in admin. Direct revenue leak between business hours.
+
+[Timer]
+# Wall-clock schedule. The earlier OnBootSec + OnUnitActiveSec pair had no
+# anchor when the timer was enabled after boot (NextElapse = infinity until
+# the service ran once) — audit finding R-1b.
+OnCalendar=*:0/10
+Persistent=true
+
+[Install]
+WantedBy=timers.target
