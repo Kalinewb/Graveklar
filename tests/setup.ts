@@ -40,8 +40,36 @@ export const TEST_DB_DIR = path.resolve(
 /** Stable per-worker key. Vitest hands each worker a 1-based pool id. */
 export const WORKER_KEY = process.env.VITEST_POOL_ID || String(process.pid);
 
+/**
+ * This worker's own directory inside the scratch root.
+ *
+ * The database file could sit directly in TEST_DB_DIR — it used to. But
+ * `getUploadDir()` derives the uploads directory from *the directory holding
+ * the database file*, so a flat layout handed every worker the same
+ * `<scratch>/uploads`, and the three files that exercise uploads
+ * (tests/api/uploads, tests/service/cleanup, tests/invariants/time-boundaries)
+ * raced each other inside it whenever vitest scheduled them concurrently:
+ *
+ *   - `rm(uploadDir, { recursive: true })` in one worker deleted a file
+ *     another had just written        → ENOENT on open
+ *   - the same `rm` collided with another worker's `mkdir`
+ *                                     → ENOENT on mkdir
+ *   - its own closing `rmdir` lost to a concurrent write
+ *                                     → ENOTEMPTY  (how CI first failed)
+ *
+ * The silent half was worse than the crashes: `readdir(uploadDir)` and
+ * `cleanupOrphanUploads()` could see — and delete — another worker's files,
+ * so those assertions were only ever right by scheduling luck.
+ *
+ * One directory per worker makes the uploads directory per-worker for free,
+ * through the real `getUploadDir()` rather than a test-only override. The
+ * schema template stays in the shared root (it is a deliberate cross-worker
+ * cache) and so do `freshDb()` files, which carry unique names already.
+ */
+export const WORKER_DIR = path.join(TEST_DB_DIR, `worker-${WORKER_KEY}`);
+
 /** This worker's database file. */
-export const TEST_DB_FILE = path.join(TEST_DB_DIR, `worker-${WORKER_KEY}.db`);
+export const TEST_DB_FILE = path.join(WORKER_DIR, 'worker.db');
 
 /** …as a Prisma connection string. */
 export const TEST_DB_URL = `file:${TEST_DB_FILE}`;
@@ -106,6 +134,9 @@ export function assertScratchDatabase(url: string): void {
 // ── Apply ────────────────────────────────────────────────────────────────────
 
 fs.mkdirSync(TEST_DB_DIR, { recursive: true });
+// prepareWorkerDb copies the template straight onto TEST_DB_FILE, so this
+// worker's directory has to exist before it runs.
+fs.mkdirSync(WORKER_DIR, { recursive: true });
 
 assertScratchDatabase(TEST_DB_URL);
 

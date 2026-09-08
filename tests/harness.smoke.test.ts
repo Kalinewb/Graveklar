@@ -13,6 +13,7 @@ import {
   REPO_ROOT,
   TEST_DB_DIR,
   TEST_DB_FILE,
+  WORKER_DIR,
   assertScratchDatabase,
   envFileDatabaseUrl,
   prismaUrlToPath,
@@ -36,6 +37,7 @@ import { adminCookieJar, call, matcherMatches, proxyCall, renterBearer, totpHead
 import { extractBearerToken, verifyRenterSessionToken } from '@/lib/renter-checklist-session';
 import { signedEvent, stripeEventPayload, stripeMock } from './helpers/mocks';
 import { PASSWORD_MASK } from '@/lib/app-config';
+import { getUploadDir } from '@/lib/upload-store';
 import { verifyStripeWebhook } from '@/lib/stripe';
 import { toDateStr } from '@/lib/dates';
 
@@ -65,6 +67,19 @@ describe('database guard', () => {
     const file = prismaUrlToPath(process.env.DATABASE_URL ?? '');
     expect(file).toBe(TEST_DB_FILE);
     expect(path.relative(TEST_DB_DIR, file).startsWith('..')).toBe(false);
+  });
+
+  it('keeps this worker’s uploads directory out of every other worker’s', () => {
+    // `getUploadDir()` resolves to `<dir holding the database>/uploads`, so a
+    // flat scratch layout gave all workers one shared directory. The three
+    // upload-touching files then deleted each other's files mid-run — ENOENT,
+    // ENOTEMPTY, and assertions reading a neighbour's uploads. Nesting the
+    // database one directory deeper is what keeps them apart, and it is
+    // invisible from those tests, so assert it here.
+    const uploadDir = getUploadDir();
+    expect(uploadDir).toBe(path.join(WORKER_DIR, 'uploads'));
+    expect(path.dirname(uploadDir)).not.toBe(TEST_DB_DIR);
+    expect(path.relative(WORKER_DIR, uploadDir).startsWith('..')).toBe(false);
   });
 
   it('is nowhere near the repository or the live database', () => {
