@@ -49,10 +49,6 @@ export default function Footer({ appConfig }: FooterProps) {
             <div>
               <a href={`https://virksomhet.brreg.no/nb/oppslag/enheter/${appConfig['orgNumber']}`} target="_blank" rel="noopener noreferrer" className="hover:text-foreground transition-colors">
                 {appConfig['businessName'] || 'Graveklar'}
-                {/* "Foretaksregistrert" only holds for the AS — show it once the
-                    business is renamed to the AS, never as a false claim for the
-                    enkeltpersonforetak. */}
-                {(appConfig['businessName'] || '').includes('AS') && ' (Foretaksregistrert)'}
                 {' · '}Org.nr {appConfig['orgNumber']}
                 {appConfig['businessAddress'] && <> · {appConfig['businessAddress']}</>}
               </a>
@@ -72,9 +68,6 @@ export default function Footer({ appConfig }: FooterProps) {
             <a href="https://www.forbrukerradet.no" target="_blank" rel="noopener noreferrer" className="hover:text-foreground transition-colors">Forbrukerrådet</a>
             <span className="text-border">·</span>
             <a href="/admin" className="text-muted-foreground hover:text-foreground transition-colors">Admin</a>
-          </div>
-          <div className="text-muted-foreground/80">
-            Er du uenig i en avgjørelse? Forbrukertvister kan bringes inn for Forbrukertilsynet og Forbrukerklageutvalget.
           </div>
         </div>
       </div>

@@ -22,6 +22,8 @@ import {
   X,
 } from 'lucide-react';
 import { GraveklarMark } from '@/components/GraveklarMark';
+import { ConfigNote } from '@/components/ConfigNote';
+import { configDefault } from '@/lib/app-config-defaults';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -486,6 +488,21 @@ export default function Home({
   const overtimeRate = getConfigValue(effectiveConfig, 'overtimeRate');
   const preOrderHourRate = getConfigValue(effectiveConfig, 'preOrderHourRate');
   const minDeliveryFee = getConfigValue(config, 'minDeliveryFee');
+
+  // Variables for the admin-editable notes. Read through the same
+  // getConfigValue/effectiveConfig the booking form prices with, so an edited
+  // note can restate a number but never contradict one — including the
+  // per-machine overrides merged into effectiveConfig above.
+  const noteCtx = {
+    deliveryIncludedKm: getConfigValue(config, 'deliveryIncludedKm'),
+    deliveryPerKm: getConfigValue(config, 'deliveryPerKm'),
+    minDeliveryFee,
+    maxDeliveryRadius: getConfigValue(config, 'maxDeliveryRadius'),
+    preOrderHourRate,
+    overtimeRate,
+    serviceArea: appConfig['serviceArea'] || 'Bodø og Salten',
+    businessName: appConfig['businessName'] || 'Graveklar',
+  };
   // Source of truth is AppConfig (group 'booking'); fall back to legacy
   // `config` for installs that haven't migrated yet.
   const minBookingDaysAhead = Math.round(
@@ -1470,17 +1487,10 @@ export default function Home({
                   /5 ({reviewAggregate.count} {reviewAggregate.count === 1 ? 'omtale' : 'omtaler'})
                 </a>
               )}
-              {appConfig['orgNumber'] && (
-                <a
-                  href={`https://virksomhet.brreg.no/nb/oppslag/enheter/${appConfig['orgNumber'].replace(/\s+/g, '')}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="hover:text-foreground transition-colors"
-                  title="Slå opp i Brønnøysundregistrene"
-                >
-                  Org.nr {appConfig['orgNumber']}
-                </a>
-              )}
+              {/* Org.nr lives in the footer, with the Brønnøysund lookup link. Above
+                  the fold it competes with the CTA for attention and answers a
+                  question nobody has yet — a visitor checks who they are dealing
+                  with after the offer interests them, not before. */}
               {appConfig['contactPhone'] && <span className="hidden md:inline">Ring oss: {appConfig['contactPhone']}</span>}
             </div>
             </div>
@@ -1651,17 +1661,12 @@ export default function Home({
                     </CardHeader>
                     <CardContent className="text-center">
                       <div className="text-4xl font-bold text-primary mb-1">{p.price.toLocaleString('nb-NO')}</div>
+                      {/* No "herav X kr mva" breakdown. "kr inkl. mva" above and the
+                          section subheading already say the price is the whole price,
+                          which is the point of these cards; a split of it invites the
+                          arithmetic the headline is trying to avoid. The full breakdown
+                          still appears on the quote, the contract and the receipt. */}
                       <div className="text-sm text-muted-foreground">kr inkl. mva</div>
-                      {(() => {
-                        const mvaRateCard = readMvaSettings(config).rate;
-                        const inclMvaCard = (Number(getConfigValue(config, 'pricesIncludeMva')) || 0) > 0;
-                        const mvaAmountCard = inclMvaCard
-                          ? Math.round(p.price - p.price / (1 + mvaRateCard / 100))
-                          : Math.round(p.price * (mvaRateCard / 100));
-                        return mvaAmountCard > 0 ? (
-                          <div className="text-xs text-muted-foreground">herav {mvaAmountCard.toLocaleString('nb-NO')} kr mva</div>
-                        ) : null;
-                      })()}
                       {p.hours > 0 && (
                         <div className="text-xs text-muted-foreground mb-4">≈ {Math.round(p.price / p.hours).toLocaleString('nb-NO')} kr/t</div>
                       )}
@@ -1716,10 +1721,12 @@ export default function Home({
               <Card className="bg-muted/50 border-dashed">
                 <CardContent className="flex items-start gap-3 p-4">
                   <Info className="w-5 h-5 text-muted-foreground mt-0.5 shrink-0" />
-                  <div className="text-sm text-muted-foreground">
-                    <strong>Hva er inkludert?</strong> <span className="text-foreground font-semibold">Drivstoff for hele leieperioden</span>, levering og henting (inntil {getConfigValue(config, 'deliveryIncludedKm')} km), forsikring, vask og personlig opplæring.
-                    Trenger du litt ekstra tid? Forbestill ekstra timer til kun {preOrderHourRate} kr per time.
-                  </div>
+                  <ConfigNote
+                    className="text-sm text-muted-foreground"
+                    template={appConfig['pricingIncludedNote']}
+                    fallback={configDefault('pricingIncludedNote')}
+                    ctx={noteCtx}
+                  />
                 </CardContent>
               </Card>
             </div>
@@ -1770,8 +1777,11 @@ export default function Home({
                   <CardContent className="flex items-start gap-3 p-4">
                     <Info className="w-5 h-5 text-muted-foreground mt-0.5 shrink-0" />
                     <div className="text-sm text-muted-foreground">
-                      <strong>Prøv det!</strong> Skriv inn adressen din i booking-skjemaet nedenfor for å se nøyaktig leveringspris.
-                      Leveringsprisen gjelder én vei – vi kjører maskinen til deg og henter den når du er ferdig.
+                      <ConfigNote
+                        template={appConfig['deliveryNote']}
+                        fallback={configDefault('deliveryNote')}
+                        ctx={noteCtx}
+                      />
                     </div>
                   </CardContent>
                 </Card>

@@ -130,6 +130,14 @@ export const APP_CONFIG_DEFAULTS: AppConfigItem[] = [
   { key: 'heroSubtext', value: 'Velg dato, vi leverer, du graver. Fastpris fra {pris} kr – inkludert levering, drivstoff, forsikring og vask. Ingen overraskelser.', label: 'Hero-undertekst (bruk {pris} for dynamisk dagspris)', group: 'content', type: 'textarea', isPublic: true, sortOrder: 2 },
   { key: 'seoTitle',       value: '',                                                                                                                        label: 'SEO-tittel (Google/sosiale medier)',                     group: 'content', type: 'text',     isPublic: true, sortOrder: 3 },
   { key: 'seoDescription', value: '',                                                                                                                        label: 'SEO-beskrivelse (maks ~160 tegn)',                       group: 'content', type: 'textarea', isPublic: true, sortOrder: 4 },
+  // Editable front-page notes. `{{token}}` pulls the live number so the copy
+  // can never drift from the settings the booking form actually charges —
+  // that drift is exactly what put "179 kr" in the terms while admin billed
+  // 500. `**bold**` marks the phrase the card leans on. Tokens available:
+  // deliveryIncludedKm, deliveryPerKm, minDeliveryFee, maxDeliveryRadius,
+  // preOrderHourRate, overtimeRate, serviceArea, businessName.
+  { key: 'pricingIncludedNote', value: '**Hva er inkludert?** **Drivstoff for hele leieperioden**, levering og henting (inntil {{deliveryIncludedKm}} km), forsikring, vask og personlig opplæring. Trenger du litt ekstra tid? Forbestill ekstra timer til kun {{preOrderHourRate}} kr per time.', label: 'Notat under prisene', group: 'content', type: 'textarea', isPublic: true, sortOrder: 6, hint: 'Bruk {{deliveryIncludedKm}}, {{preOrderHourRate}} osv. for tall som følger innstillingene. **tekst** blir uthevet.' },
+  { key: 'deliveryNote',        value: '**Prøv det!** Skriv inn adressen din i booking-skjemaet nedenfor for å se nøyaktig leveringspris. Prisen dekker både levering og henting — avstanden måles én vei fra basen vår, og de første {{deliveryIncludedKm}} km er inkludert.', label: 'Notat under leveringsprisen', group: 'content', type: 'textarea', isPublic: true, sortOrder: 7, hint: 'Samme tokens som notatet under prisene.' },
   { key: 'seoKeywords',    value: '',                                                                                                                        label: 'SEO-nøkkelord (kommaseparert – tom = auto fra utstyr/område)', group: 'content', type: 'text', isPublic: true, sortOrder: 5 },
 
   // ── Visning (UI) — TOGGLES + DISPLAY SIGNALS ─────────
@@ -241,3 +249,14 @@ export const APP_CONFIG_GROUP_ORDER = [
   'survey',
   'system',
 ];
+
+/**
+ * The shipped default for a config key.
+ *
+ * Used as the render-time fallback for the editable front-page notes: a
+ * database created before the key existed has no row for it, and a blank card
+ * is a worse outcome than the copy the release shipped with.
+ */
+export function configDefault(key: string): string {
+  return APP_CONFIG_DEFAULTS.find((item) => item.key === key)?.value ?? '';
+}
