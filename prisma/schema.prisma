@@ -18,6 +18,11 @@ model Booking {
   rentalType      String // "day" | "weekend" | "week" | "custom"
   startDate       DateTime
   customDays      Int?
+  // Retired from the booking form 2026-09-08 — delivery and pickup times are
+  // set by us on the order/calendar now, and a customer who needs to discuss a
+  // time uses chat or the comment field. The column stays: existing bookings
+  // still carry what their customer asked for, admin still shows it, and
+  // dropping it would make `prisma db push` refuse the next container update.
   preferredTime   String?
   deliveryDistance Float
   deliveryFee     Int

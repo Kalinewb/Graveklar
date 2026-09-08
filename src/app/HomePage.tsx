@@ -258,7 +258,6 @@ export default function Home({
   const [quoteLoading, setQuoteLoading] = useState(false);
   const [address, setAddress] = useState('');
   const [notes, setNotes] = useState('');
-  const [preferredTime, setPreferredTime] = useState('');
   const [websiteHoneypot, setWebsiteHoneypot] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showConfirmation, setShowConfirmation] = useState(false);
@@ -1099,7 +1098,6 @@ export default function Home({
           rentalType,
           startDate,
           customDays: rentalType === 'custom' ? customDays : rentalType === 'week' && weekCount > 1 ? weekCount * 7 : undefined,
-          preferredTime: preferredTime.trim() || undefined,
           deliveryDistance: selfPickup ? 0 : (deliveryInfo?.distance ?? 0),
           deliveryFee: selfPickup ? 0 : (deliveryInfo?.fee ?? 0),
           deliveryQuoteToken: selfPickup ? undefined : deliveryInfo?.token,
@@ -1157,7 +1155,7 @@ export default function Home({
     // just agreed to — most visibly `selfPickup`, which sent `deliveryFee: 0`
     // with no `deliveryQuoteToken` for an address the dialog had just quoted
     // 1 551 kr for (Q-5).
-  }, [name, phone, email, address, startDate, rentalType, selfPickup, selectedMachineId, customDays, weekCount, preferredTime, deliveryInfo, deliveryFee, extraHours, notes, discountCode, quote, termsAccepted, websiteHoneypot, stripeEnabled, vippsEnabled]);
+  }, [name, phone, email, address, startDate, rentalType, selfPickup, selectedMachineId, customDays, weekCount, deliveryInfo, deliveryFee, extraHours, notes, discountCode, quote, termsAccepted, websiteHoneypot, stripeEnabled, vippsEnabled]);
 
   /* Return date — the morning the machine comes back.
    *
@@ -2527,16 +2525,6 @@ export default function Home({
                   <Input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required className="mt-1.5" placeholder="ola@eksempel.no" />
                 </div>
                 <div>
-                  <Label htmlFor="preferredTime">Ønsket levering/henting (valgfritt)</Label>
-                  <Input
-                    id="preferredTime"
-                    value={preferredTime}
-                    onChange={(e) => setPreferredTime(e.target.value)}
-                    className="mt-1.5"
-                    placeholder="F.eks. 08:00, formiddag, etter kl. 16"
-                  />
-                </div>
-                <div>
                   <Label htmlFor="notes">Kommentar (valgfritt)</Label>
                   <Textarea id="notes" value={notes} onChange={(e) => setNotes(e.target.value)} className="mt-1.5" placeholder="F.eks. beskrivelse av prosjekt, spesielle ønsker..." rows={3} />
                 </div>
@@ -3159,14 +3147,6 @@ export default function Home({
                 <span className="text-muted-foreground">E-post:</span>
                 <span className="font-medium">{email}</span>
               </div>
-              {/* The customer asked for a specific time; the review step used
-                  to drop it silently even though it is stored on the booking. */}
-              {preferredTime.trim() && (
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Ønsket tid:</span>
-                  <span className="font-medium text-right max-w-[200px]">{preferredTime}</span>
-                </div>
-              )}
               {notes && (
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Kommentar:</span>
