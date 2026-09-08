@@ -14,7 +14,15 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          # 22, not 20, because the test harness needs it:
+          #   - tests/e2e/helpers.ts imports `node:sqlite`, added in 22.5.0.
+          #     On 20 the import throws at collection time and the nine e2e
+          #     suites that use it fail instead of skipping.
+          #   - puppeteer-core and @puppeteer/browsers both declare
+          #     `node: >=22.12.0`; npm warned EBADENGINE on every install.
+          # The Dockerfile still ships node:20-slim. Nothing under src/ uses
+          # either dependency, so the runtime is unaffected.
+          node-version: '22'
           cache: 'npm'
 
       - name: Install dependencies
