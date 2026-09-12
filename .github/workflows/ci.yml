@@ -2,7 +2,11 @@ name: ci
 
 on:
   push:
-    branches: [main]
+    # dev as well as main. Work is saved to dev and only fast-forwarded onto
+    # main when it is ready to deploy, so dev is where a mistake first shows
+    # up — running the suite only on main would mean the branch that exists to
+    # catch problems is the one branch nothing checks.
+    branches: [main, dev]
   pull_request:
 
 jobs:
