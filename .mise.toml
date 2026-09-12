@@ -1,0 +1,38 @@
+# Pin the local toolchain to what production actually runs.
+#
+# The Proxmox LXC installs Node 22 and then npm@11.6.2 on top of it
+# (graveklar-lxc: install/graveklar-install.sh, NODE_VERSION/NODE_MODULE).
+# CI (.github/workflows/ci.yml) also runs Node 22: the test harness imports
+# node:sqlite (22.5+) and puppeteer-core declares node >=22.12.
+#
+# Develop on 22, not on whatever the laptop happens to have.
+[tools]
+node = "22"
+
+# ---------------------------------------------------------------------------
+# npm is NOT pinned here, deliberately.
+#
+# `"npm:npm" = "11.6.2"` installs but never wins: mise resolves the npm
+# backend after node, so node's bundled npm (10.9.8 on 22.23.x) stays first on
+# PATH and the pin silently does nothing. A pin that looks applied and isn't
+# is worse than none.
+#
+# What actually matters is narrower than "always run 11.6.2": `npm ci` is
+# tolerant across these versions, so installing is fine on any of them.
+# The hazard is REGENERATING the lockfile. npm 11.7+ records the wasm32-wasi
+# variants of tailwind/sharp and their @emnapi/* optional deps as lockfile
+# entries; 10.x and 11.6.2 do not. So:
+#
+#   - `npm ci`      safe on 10.9.8, 11.6.2 and 11.19 alike.
+#   - `npm install` rewrites package-lock.json to match whichever npm ran it.
+#                   Under an older npm it STRIPS the @emnapi entries, which is
+#                   the exact state that made CI and the container both refuse
+#                   the checkout until PR #1 repaired it.
+#
+# Before committing a regenerated lockfile, verify it against the container's
+# pin — not just against whatever is on this laptop:
+#
+#   npm i --prefix /tmp/npmpin npm@11.6.2
+#   /tmp/npmpin/node_modules/.bin/npm ci --dry-run
+#
+# Verified 2026-09-12 on ef78810: clean under 11.6.2 (561 packages, exit 0).
